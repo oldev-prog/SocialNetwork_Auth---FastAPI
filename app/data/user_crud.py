@@ -28,20 +28,23 @@ class UserCRUD:
 
         return new_user
 
-    async def get_user(self, user_id: int) -> User|None:
+    async def get_user(self, email: str) -> User|None:
         try:
             logger.debug(f'Connecting to database')
             result = await self.db.execute(
-                select(User).where(User.id == user_id)
+                select(User).where(User.email == email)
             )
         except Exception as e:
             logger.error('Error getting user: s%', e)
             return None
 
         user = result.scalar_one_or_none()
-        logger.info(f'User searched: {user.email}')
-        if not user:
-            return None
+
+        if user:
+            logger.info(f'User found: {user.email}')
         else:
-            return user
+            logger.info(f'User with email {email} not found (it is good for signup)')
+            return None
+
+        return user
 

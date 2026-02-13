@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Query, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from app.main import user_crud, var_token_crud, jwt_token_crud
+from app.data.email_var_crud import EmailVarCRUD
+from app.data.user_crud import UserCRUD
+from app.login.jwt_token import JWTTokenCRUD
 from app.schemas.request_schemas import RegisterRequest, LoginRequest
 from app.schemas.response_shemas import RefreshTokenResponse, AccessTokenResponse, BaseResponse
 from app.utils.passw_func import hash_password, verify_password
@@ -8,14 +10,19 @@ from app.signup.email_verification.creating_var_token import generate_var_token
 from app.signup.email_verification.celery.tasks import sending_email_verification
 from app.utils.utils import hash_token, update_db
 from datetime import datetime, timezone
+from app.dependencies.db_dependencies import db_session
 
 auth_router = APIRouter(prefix='/auth', tags=['auth'])
 
 @auth_router.post('/signup', response_model=BaseResponse)
-async def signup_user(request: RegisterRequest):
-    email, password, account_status = request.email, request.password, 'not verified'
-    user = await user_crud.get_user(email)
-    if user:
+async def signup_user(request: RegisterRequest, db: db_session):
+
+    user_crud = UserCRUD(db)
+    var_token_crud = EmailVarCRUD(db)
+
+    email, password, account_status = request.email, request.password, 'not_verified'
+    exiting_user = await user_crud.get_user(email)
+    if exiting_user:
         return JSONResponse(
             {
                 'details': 'email already registered',
@@ -36,7 +43,19 @@ async def signup_user(request: RegisterRequest):
 
     await var_token_crud.add_var_token(user.id, hash_var_token)
 
-    sending_email_verification.delay(recipient_email=email, subject='Verification', plain_content='')
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+    sending_email_verification.delay(
+        recipient_email=email,
+        subject='Verification',
+        plain_content=
+        'To verify your account, please click the link below\n'
+        f'http://127.0.0.1:8000/verify_email/verify?token={var_token}',
+    )
 
     return JSONResponse(
         {
@@ -45,45 +64,50 @@ async def signup_user(request: RegisterRequest):
     )
 
 
-@auth_router.post('/verify_email', response_model=BaseResponse)
-async def verify_email(token: str = Query(...)):
-    token_hash = hash_token(token)
-
-    var_token = await var_token_crud.check_exist_token(token_hash)
-
-    if (
-        not var_token
-        or var_token.expires_at < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Invalid or expired verification token',
-        )
-
-    user = await user_crud.get_user(var_token.user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Invalid or expired verification token',
-        )
-
-    user.account_status = 'active'
-    var_token.used = True
-
-    await update_db(user, var_token)
-
-    return JSONResponse(
-        {
-            'details': f'user {user.email} verified',
-        }
-    )
+# @auth_router.post('/verify_email', response_model=BaseResponse)
+# async def verify_email(db: db_session, token: str = Query(...)):
+#     token_hash = hash_token(token)
+#
+#     user_crud = UserCRUD(db)
+#     var_token_crud = EmailVarCRUD(db)
+#
+#     var_token = await var_token_crud.check_exist_token(token_hash)
+#
+#     if (
+#         not var_token
+#         or var_token.expires_at < datetime.now(timezone.utc)
+#     ):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail='Invalid or expired verification token',
+#         )
+#
+#     user = await user_crud.get_user(var_token.user_id)
+#
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail='Invalid or expired verification token',
+#         )
+#
+#     user.account_status = 'active'
+#     var_token.used = True
+#
+#     await update_db(user, var_token)
+#
+#     return JSONResponse(
+#         {
+#             'details': f'user {user.email} verified',
+#         }
+#     )
 
 
 @auth_router.post('/login', response_model=AccessTokenResponse)
-async def login_user(data: LoginRequest):
+async def login_user(data: LoginRequest, db: db_session):
+    user_crud = UserCRUD(db)
+    jwt_token_crud = JWTTokenCRUD(db)
 
-    user = user_crud.get_user(data.email)
+    user = await user_crud.get_user(data.email)
 
     if (
         not user
@@ -124,7 +148,10 @@ async def login_user(data: LoginRequest):
 
 
 @auth_router.post('/update_access', response_model=AccessTokenResponse)
-async def update_access_token(request: Request):
+async def update_access_token(request: Request, db: db_session):
+
+    jwt_token_crud = JWTTokenCRUD(db)
+
     refresh_token = request.cookies.get('refresh_token')
 
     if not refresh_token:
@@ -167,7 +194,10 @@ async def update_access_token(request: Request):
 
 
 @auth_router.post('/update_refresh', response_model=RefreshTokenResponse)
-async def update_refresh_token(request: Request):
+async def update_refresh_token(request: Request, db: db_session):
+
+    jwt_token_crud = JWTTokenCRUD(db)
+
     old_refresh_token = request.cookies.get('refresh_token')
 
     if not old_refresh_token:

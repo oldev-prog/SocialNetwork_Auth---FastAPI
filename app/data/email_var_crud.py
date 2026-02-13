@@ -1,9 +1,8 @@
-from app.data.models import User, AccountStatus, EmailVerification
+from app.data.models import EmailVerification
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
 import logging
-from app.utils.utils import hash_token
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +10,8 @@ class EmailVarCRUD:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def add_var_token(self, user_id: int, token: str, ) -> EmailVerification:
-        hashed_token = hash_token(token)
+    async def add_var_token(self, user_id: int, hashed_token: str, ) -> EmailVerification:
+
 
         new_token = EmailVerification(
         user_id=user_id,

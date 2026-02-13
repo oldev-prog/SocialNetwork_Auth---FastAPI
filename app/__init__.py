@@ -1,4 +1,4 @@
-from data.db_init import setup_db
+from app.data.db_init import setup_db
 import asyncio
 
-asyncio.run(setup_db())
+# asyncio.run(setup_db())

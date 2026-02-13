@@ -2,40 +2,83 @@ from fastapi import APIRouter, Query, HTTPException, status
 from fastapi.responses import JSONResponse
 from app.schemas.response_shemas import BaseResponse
 from app.utils.utils import hash_token, update_db
-from app.main import var_token_crud, user_crud
 from datetime import datetime, timezone
+from app.dependencies.db_dependencies import db_session
+from app.data.email_var_crud import EmailVarCRUD
+from app.data.user_crud import UserCRUD
 
-verify_email_router = APIRouter(prefix='verify_email', tags=['verify_email'])
+verify_email_router = APIRouter(prefix='/verify_email', tags=['verify_email'])
+
+# @verify_email_router.post('/verify', response_model=BaseResponse)
+# async def verify_email(db: db_session, token: str = Query(...)):
+#     if token.used:
+#         raise HTTPException(status_code=400, detail="Token already used")
+#
+#     hashed_token = hash_token(token)
+#
+#     var_token_crud = EmailVarCRUD(db)
+#     user_crud = UserCRUD(db)
+#
+#     token = await var_token_crud.check_exist_token(hashed_token)
+#
+#     if (
+#         not token
+#         or token.expires_at < datetime.now(timezone.utc)
+#     ):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail='Invalid or expired verification token',
+#         )
+#
+#     user = await user_crud.get_user(token.user_id)
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail='User not found for this verification token',
+#         )
+#
+#     user.account_status = 'active'
+#     token.used = True
+#
+#     await update_db([user, token], user_crud.db)
+#
+#     return JSONResponse(
+#         {
+#             'details': f'user {user.email} has been successfully verified',
+#         }
+#     )
 
 @verify_email_router.post('/verify', response_model=BaseResponse)
-async def verify_email(token: str = Query(...)):
+async def verify_email(db: db_session, token: str = Query(...)):
+    print('start verify')
+
     hashed_token = hash_token(token)
 
-    token = await var_token_crud.check_exist_token(hashed_token)
+    var_token_crud = EmailVarCRUD(db)
+    user_crud = UserCRUD(db)
 
-    if (
-        not token
-        or token.expires_at < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Invalid or expired verification token',
-        )
+    token_record = await var_token_crud.check_exist_token(hashed_token)
 
-    user = user_crud.get_user(token.user_id)
+    if not token_record:
+        raise HTTPException(status_code=400, detail="Invalid token")
+
+    if token_record.used:
+        raise HTTPException(status_code=400, detail="Token already used")
+
+    if token_record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Token expired")
+
+    user = await user_crud.get_user_by_id(token_record.user_id)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='User not found for this verification token',
-        )
+        raise HTTPException(status_code=404, detail="User not found")
 
-    user.account_status = 'active'
-    token.used = True
+    try:
+        user.account_status = 'active'
+        token_record.used = True
 
-    await update_db([user, token], user_crud.db)
+        await update_db([user, token_record], user_crud.db)
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Internal database error")
 
-    return JSONResponse(
-        {
-            'details': f'user {user.email} has been successfully verified',
-        }
-    )
+    return JSONResponse({"details": f"User {user.email} verified successfully"})

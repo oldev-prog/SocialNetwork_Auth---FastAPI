@@ -2,13 +2,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import aiosmtplib
 import logging
+from app.data.config import settings
 
 logger = logging.getLogger(__name__)
 
-import os
-
-username = os.getenv('GMAIL_USER')
-password = os.getenv('GMAIL_APP_PASSWORD')
+username = settings.GMAIL_USER
+password = settings.GMAIL_APP_PASSWORD
 
 async def send_verification_email(
         recipient_email: str,
@@ -40,9 +39,13 @@ async def send_verification_email(
     try:
         await aiosmtplib.send(
             message,
-            hostname='smtp.gmail.com',
-            port=465,
+            hostname="smtp.gmail.com",
+            port=587,
             username=username,
-            password=password)
+            password=password,
+            use_tls=False,
+            start_tls=True,
+            timeout=30, )
     except Exception as e:
-        logger.exception('Error sending email: s%', e)
+        logger.exception('Error sending email: %s', e)
+        raise

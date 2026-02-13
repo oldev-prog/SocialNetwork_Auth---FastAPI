@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from app.data.class_base import Base
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import DateTime, ForeignKey, BigInteger, String, Text, Boolean
-from enum import Enum
+from sqlalchemy import DateTime, ForeignKey, BigInteger, String, Text, Boolean, Enum
+# from enum import Enum
+from enum import Enum as PyEnum
 
-class AccountStatus(Enum):
+class AccountStatus(PyEnum):
     active = 'active'
     banned = 'banned'
     deleted = 'deleted'
