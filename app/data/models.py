@@ -24,7 +24,7 @@ class EmailVerification(Base):
     __tablename__ = 'email_verifications'
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_email: Mapped[str] = mapped_column(nullable=False)
     hashed_token: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used: Mapped[bool] = mapped_column(Boolean, default=False)

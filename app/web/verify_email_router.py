@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from app.schemas.response_shemas import BaseResponse
 from app.utils.utils import hash_token, update_db
 from datetime import datetime, timezone
@@ -48,7 +48,7 @@ verify_email_router = APIRouter(prefix='/verify_email', tags=['verify_email'])
 #         }
 #     )
 
-@verify_email_router.post('/verify', response_model=BaseResponse)
+@verify_email_router.get('/verify', response_model=BaseResponse)
 async def verify_email(db: db_session, token: str = Query(...)):
     print('start verify')
 
@@ -68,7 +68,7 @@ async def verify_email(db: db_session, token: str = Query(...)):
     if token_record.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="Token expired")
 
-    user = await user_crud.get_user_by_id(token_record.user_id)
+    user = await user_crud.get_user(token_record.user_email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -77,8 +77,10 @@ async def verify_email(db: db_session, token: str = Query(...)):
         token_record.used = True
 
         await update_db([user, token_record], user_crud.db)
+
     except Exception:
         await db.rollback()
         raise HTTPException(status_code=500, detail="Internal database error")
 
-    return JSONResponse({"details": f"User {user.email} verified successfully"})
+    # return JSONResponse({"details": f"User {user.email} verified successfully"})
+    return RedirectResponse(url="http://localhost:5173/verification-success")

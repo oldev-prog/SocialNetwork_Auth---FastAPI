@@ -6,13 +6,14 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.data.models import RefreshToken
+from app.data.config import settings
 
 logger = logging.getLogger(__name__)
 
 class JWTTokenCRUD:
     def __init__(self, db: AsyncSession) -> None:
-        self.secret_key = os.environ.get('SECRET_KEY')
-        self.algorithm = os.environ.get('ALGORITHM')
+        self.secret_key = settings.SECRET_KEY
+        self.algorithm = settings.ALGORITHM
 
         self.ACCESS_TOKEN_EXPIRE_MINUTES = 15
         self.REFRESH_TOKEN_EXPIRE_DAYS = 7

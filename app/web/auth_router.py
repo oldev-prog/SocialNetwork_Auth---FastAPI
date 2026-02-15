@@ -11,6 +11,7 @@ from app.signup.email_verification.celery.tasks import sending_email_verificatio
 from app.utils.utils import hash_token, update_db
 from datetime import datetime, timezone
 from app.dependencies.db_dependencies import db_session
+from app.data.models import AccountStatus
 
 auth_router = APIRouter(prefix='/auth', tags=['auth'])
 
@@ -23,11 +24,12 @@ async def signup_user(request: RegisterRequest, db: db_session):
     email, password, account_status = request.email, request.password, 'not_verified'
     exiting_user = await user_crud.get_user(email)
     if exiting_user:
-        return JSONResponse(
-            {
-                'details': 'email already registered',
-            }
-        )
+        print('User already exists')
+        if exiting_user:
+            return JSONResponse(
+                status_code=400,
+                content={'details': 'Email already registered.'}
+            )
 
     hashed_password = hash_password(password)
 
@@ -41,7 +43,7 @@ async def signup_user(request: RegisterRequest, db: db_session):
 
     hash_var_token = hash_token(var_token)
 
-    await var_token_crud.add_var_token(user.id, hash_var_token)
+    await var_token_crud.add_var_token(user.email, hash_var_token)
 
     try:
         await db.commit()
@@ -64,44 +66,6 @@ async def signup_user(request: RegisterRequest, db: db_session):
     )
 
 
-# @auth_router.post('/verify_email', response_model=BaseResponse)
-# async def verify_email(db: db_session, token: str = Query(...)):
-#     token_hash = hash_token(token)
-#
-#     user_crud = UserCRUD(db)
-#     var_token_crud = EmailVarCRUD(db)
-#
-#     var_token = await var_token_crud.check_exist_token(token_hash)
-#
-#     if (
-#         not var_token
-#         or var_token.expires_at < datetime.now(timezone.utc)
-#     ):
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail='Invalid or expired verification token',
-#         )
-#
-#     user = await user_crud.get_user(var_token.user_id)
-#
-#     if not user:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail='Invalid or expired verification token',
-#         )
-#
-#     user.account_status = 'active'
-#     var_token.used = True
-#
-#     await update_db(user, var_token)
-#
-#     return JSONResponse(
-#         {
-#             'details': f'user {user.email} verified',
-#         }
-#     )
-
-
 @auth_router.post('/login', response_model=AccessTokenResponse)
 async def login_user(data: LoginRequest, db: db_session):
     user_crud = UserCRUD(db)
@@ -112,11 +76,16 @@ async def login_user(data: LoginRequest, db: db_session):
     if (
         not user
         or not verify_password(data.password, user.password_hash)
-        or user.account_status != 'active'
         ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Invalid password or email',
+        )
+
+    if user.account_status is not AccountStatus.active:
+        raise HTTPException(
+            status_code=status.HTTP_406_NOT_ACCEPTABLE,
+            detail='Account is not active',
         )
 
     access_token, expire_in = jwt_token_crud.create_access_token(user.id)
@@ -124,7 +93,7 @@ async def login_user(data: LoginRequest, db: db_session):
 
     hashed_refresh_token = hash_token(refresh_token)
 
-    await jwt_token_crud.add_token(hashed_refresh_token)
+    await jwt_token_crud.add_refresh_token(hashed_refresh_token, user.id)
 
     response = JSONResponse(
         {
@@ -139,7 +108,8 @@ async def login_user(data: LoginRequest, db: db_session):
         key='refresh_token',
         value=refresh_token,
         httponly=True,
-        secure=True,
+        # secure=True,
+        secure=False,
         samesite='strict',
         path='/auth/update_refresh',
     )

@@ -10,11 +10,11 @@ class EmailVarCRUD:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def add_var_token(self, user_id: int, hashed_token: str, ) -> EmailVerification:
+    async def add_var_token(self, user_email: str, hashed_token: str, ) -> EmailVerification:
 
 
         new_token = EmailVerification(
-        user_id=user_id,
+        user_email=user_email,
         hashed_token=hashed_token,
         expires_at=datetime.now(timezone.utc)+timedelta(hours=24)
         )

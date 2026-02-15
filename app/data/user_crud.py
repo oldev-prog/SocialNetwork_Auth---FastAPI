@@ -35,7 +35,7 @@ class UserCRUD:
                 select(User).where(User.email == email)
             )
         except Exception as e:
-            logger.error('Error getting user: s%', e)
+            logger.error('Error getting user: %s', e)
             return None
 
         user = result.scalar_one_or_none()
