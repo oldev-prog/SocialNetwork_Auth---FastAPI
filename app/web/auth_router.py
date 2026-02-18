@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from app.data.email_var_crud import EmailVarCRUD
 from app.data.user_crud import UserCRUD
 from app.login.jwt_token import JWTTokenCRUD
-from app.schemas.request_schemas import RegisterRequest, LoginRequest
+from app.schemas.request_schemas import RegisterRequest, LoginRequest, EmailOnlyRequest
 from app.schemas.response_shemas import RefreshTokenResponse, AccessTokenResponse, BaseResponse
 from app.utils.passw_func import hash_password, verify_password
 from app.signup.email_verification.creating_var_token import generate_var_token
@@ -70,6 +70,7 @@ async def signup_user(request: RegisterRequest, db: db_session):
 async def login_user(data: LoginRequest, db: db_session):
     user_crud = UserCRUD(db)
     jwt_token_crud = JWTTokenCRUD(db)
+    var_token_crud = EmailVarCRUD(db)
 
     user = await user_crud.get_user(data.email)
 
@@ -83,17 +84,45 @@ async def login_user(data: LoginRequest, db: db_session):
         )
 
     if user.account_status is not AccountStatus.active:
+        new_token = generate_var_token(32)
+        hash_new_token = hash_token(new_token)
+
+        await var_token_crud.add_var_token(user.email, hash_new_token)
+
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise HTTPException(status_code=500, detail="Database error")
+
+        sending_email_verification.delay(
+            recipient_email=user.email,
+            subject='Verification (Resend)',
+            plain_content=
+            'To verify your account, please click the link below\n'
+            f'http://127.0.0.1:8000/verify_email/verify?token={new_token}',
+        )
         raise HTTPException(
             status_code=status.HTTP_406_NOT_ACCEPTABLE,
-            detail='Account is not active',
+            detail='Account is not varified. Please check your email.',
         )
 
+    # existing_refresh_token = await jwt_token_crud.get_refresh_token(user.id)
+    # refresh_token = None
+    #
+    # if (
+    #         existing_refresh_token
+    #         and not existing_refresh_token.revoked_at
+    #         and existing_refresh_token.expires_at > datetime.now(timezone.utc)
+    # ):
+    #     await jwt_token_crud.revoke_specific_token(user.id, existing_refresh_token.session_id)
+
     access_token, expire_in = jwt_token_crud.create_access_token(user.id)
-    refresh_token = jwt_token_crud.create_refresh_token(user.id)
+    refresh_token, session_id = jwt_token_crud.create_refresh_token(user.id)
 
     hashed_refresh_token = hash_token(refresh_token)
 
-    await jwt_token_crud.add_refresh_token(hashed_refresh_token, user.id)
+    await jwt_token_crud.add_refresh_token(hashed_refresh_token, user.id, session_id)
 
     response = JSONResponse(
         {
@@ -217,3 +246,45 @@ async def update_refresh_token(request: Request, db: db_session):
     )
 
     return response
+
+
+@auth_router.post('/resend-verification', response_model=BaseResponse)
+async def resend_verification(request: EmailOnlyRequest, db: db_session):
+    user_crud = UserCRUD(db)
+    var_token_crud = EmailVarCRUD(db)
+
+    user = await user_crud.get_user(request.email)
+    if not user:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    if user.account_status == AccountStatus.active:
+        return JSONResponse(
+            status_code=400,
+            content={'details': 'This account is already verified.'}
+        )
+
+    new_token = generate_var_token(32)
+    hash_new_token = hash_token(new_token)
+
+    await var_token_crud.add_var_token(user.email, hash_new_token)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+
+    sending_email_verification.delay(
+        recipient_email=user.email,
+        subject='Verification (Resend)',
+        plain_content=
+        'To verify your account, please click the link below\n'
+        f'http://127.0.0.1:8000/verify_email/verify?token={new_token}',
+    )
+
+    return JSONResponse({'details': 'Verification email has been resent.'})
+
+
+@auth_router.post('/logout')
+async def logout(request: Request, db: db_session):
+    pass

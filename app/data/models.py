@@ -40,3 +40,4 @@ class RefreshToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     replaced_by: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    session_id: Mapped[str] = mapped_column(String, unique=True)
