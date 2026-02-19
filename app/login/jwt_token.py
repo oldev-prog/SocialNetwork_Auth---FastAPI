@@ -62,18 +62,13 @@ class JWTTokenCRUD:
 
         try:
             self.db.add(new_refresh_token)
-            await self.db.commit()
-            await self.db.refresh(new_refresh_token)
+            # await self.db.commit()
+            # await self.db.refresh(new_refresh_token)
         except Exception as e:
             logger.error('Failed to add new refresh token: %s', e)
 
         return new_refresh_token
 
-    async def set_refresh_token(self, user_id: int, hashed_token: str):
-        query_delete = delete(RefreshToken).where(RefreshToken.user_id == user_id)
-        await self.db.execute(query_delete)
-
-        await self.add_refresh_token(hashed_token, user_id)
 
     async def revoke_specific_token(self, user_id: int, session_id: str):
         query = delete(RefreshToken).where(
@@ -83,10 +78,11 @@ class JWTTokenCRUD:
         await self.db.execute(query)
 
 
-    async def get_refresh_token(self, user_id: int) -> RefreshToken|None:
+
+    async def get_refresh_token(self, session_id: str) -> RefreshToken|None:
         try:
             result = await self.db.execute(
-                select(RefreshToken).where(RefreshToken.user_id == user_id)
+                select(RefreshToken).where(RefreshToken.session_id == session_id)
             )
         except Exception as e:
             logger.error('Failed to get refresh token: %s', e)

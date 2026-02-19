@@ -11,6 +11,7 @@ from app.signup.email_verification.celery.tasks import sending_email_verificatio
 from app.utils.utils import hash_token, update_db
 from datetime import datetime, timezone
 from app.dependencies.db_dependencies import db_session
+from app.dependencies.auth_dependencies import current_user_id
 from app.data.models import AccountStatus
 
 auth_router = APIRouter(prefix='/auth', tags=['auth'])
@@ -107,22 +108,14 @@ async def login_user(data: LoginRequest, db: db_session):
             detail='Account is not varified. Please check your email.',
         )
 
-    # existing_refresh_token = await jwt_token_crud.get_refresh_token(user.id)
-    # refresh_token = None
-    #
-    # if (
-    #         existing_refresh_token
-    #         and not existing_refresh_token.revoked_at
-    #         and existing_refresh_token.expires_at > datetime.now(timezone.utc)
-    # ):
-    #     await jwt_token_crud.revoke_specific_token(user.id, existing_refresh_token.session_id)
-
     access_token, expire_in = jwt_token_crud.create_access_token(user.id)
     refresh_token, session_id = jwt_token_crud.create_refresh_token(user.id)
 
     hashed_refresh_token = hash_token(refresh_token)
 
     await jwt_token_crud.add_refresh_token(hashed_refresh_token, user.id, session_id)
+
+    await db.commit()
 
     response = JSONResponse(
         {
@@ -140,15 +133,14 @@ async def login_user(data: LoginRequest, db: db_session):
         # secure=True,
         secure=False,
         samesite='strict',
-        path='/auth/update_refresh',
+        path='/auth/update_token',
     )
 
     return response
 
 
-@auth_router.post('/update_access', response_model=AccessTokenResponse)
-async def update_access_token(request: Request, db: db_session):
-
+@auth_router.post('/update_token', response_model=AccessTokenResponse)
+async def update_token(request: Request, db: db_session):
     jwt_token_crud = JWTTokenCRUD(db)
 
     refresh_token = request.cookies.get('refresh_token')
@@ -156,30 +148,50 @@ async def update_access_token(request: Request, db: db_session):
     if not refresh_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Refresh token not found',
+            detail='Refresh token not found in cookies',
         )
 
-    payload = jwt_token_crud.decode_refresh_token(refresh_token)
+    try:
+        payload = jwt_token_crud.decode_refresh_token(refresh_token)
+        user_id = int(payload.get('sub'))
+        session_id = payload.get('jti')
 
-    user_id = int(payload.get('sub'))
-    if not user_id:
+        if not user_id or not session_id:
+            raise ValueError()
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail='Invalid refresh token payload',
         )
 
-    token_record = await jwt_token_crud.get_refresh_token(user_id)
+    token_record = await jwt_token_crud.get_refresh_token(session_id)
+
+    incoming_hash = hash_token(refresh_token)
+
     if (
-        not token_record
-        or token_record.revoked_at
-        or token_record.expires_at < datetime.now(timezone.utc)
+            not token_record
+            or token_record.refresh_token_hash != incoming_hash
+            or token_record.expires_at < datetime.now(timezone.utc)
     ):
+        await jwt_token_crud.revoke_specific_token(user_id, session_id)
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Refresh token revoked or expired',
+            detail='Refresh token expired or compromised',
         )
 
     new_access_token, expires_in = jwt_token_crud.create_access_token(user_id)
+    new_refresh_token, new_session_id = jwt_token_crud.create_refresh_token(user_id)
+    new_hashed_refresh = hash_token(new_refresh_token)
+
+    await jwt_token_crud.revoke_specific_token(user_id, session_id)
+    await jwt_token_crud.add_refresh_token(new_hashed_refresh, user_id, new_session_id)
+
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Database error during rotation")
 
     response = JSONResponse(
         {
@@ -189,60 +201,13 @@ async def update_access_token(request: Request, db: db_session):
         }
     )
 
-    return response
-
-
-@auth_router.post('/update_refresh', response_model=RefreshTokenResponse)
-async def update_refresh_token(request: Request, db: db_session):
-
-    jwt_token_crud = JWTTokenCRUD(db)
-
-    old_refresh_token = request.cookies.get('refresh_token')
-
-    if not old_refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Refresh token not found',
-        )
-
-    payload = jwt_token_crud.decode_refresh_token(old_refresh_token)
-
-    user_id = int(payload.get('sub'))
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Invalid refresh token payload',
-        )
-
-    token_record = await jwt_token_crud.get_refresh_token(user_id)
-    if (
-            not token_record
-            or token_record.revoked_at
-            or token_record.expires_at < datetime.now(timezone.utc)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail='Refresh token revoked or expired',
-        )
-
-    new_refresh_token = jwt_token_crud.create_refresh_token(user_id)
-    hashed_new_refresh_token = hash_token(new_refresh_token)
-
-    await jwt_token_crud.add_refresh_token(hashed_new_refresh_token, user_id)
-
-    response = JSONResponse(
-        {
-            'details':'Refresh token updated',
-        }
-    )
-
     response.set_cookie(
         key='refresh_token',
         value=new_refresh_token,
         httponly=True,
-        secure=True,
+        secure=False,  # True для HTTPS
         samesite='strict',
-        path='/auth/update_refresh',
+        path='/auth/update_token',
     )
 
     return response
@@ -287,4 +252,31 @@ async def resend_verification(request: EmailOnlyRequest, db: db_session):
 
 @auth_router.post('/logout')
 async def logout(request: Request, db: db_session):
-    pass
+    jwt_token_crud = JWTTokenCRUD(db)
+    refresh_token = request.cookies.get('refresh_token')
+    print(f'refresh_token: {refresh_token}')
+
+    if not refresh_token:
+        return JSONResponse({"details": "Already logged out."})
+
+    try:
+        payload = jwt_token_crud.decode_refresh_token(refresh_token)
+        user_id = int(payload.get('sub'))
+        session_id = payload.get('jti')
+
+        await jwt_token_crud.revoke_specific_token(user_id, session_id)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        pass
+
+    response = JSONResponse({"details": "Successfully logged out."})
+
+    response.delete_cookie(
+        key='refresh_token',
+        path='/auth/update_token',
+        httponly=True,
+        samesite='strict'
+    )
+
+    return response

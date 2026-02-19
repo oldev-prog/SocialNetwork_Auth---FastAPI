@@ -1,7 +1,10 @@
 from app.data.db_init import async_session_factory
 from typing import Annotated
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from app.data.config import settings
+import jwt
 
 async def get_db():
     async with async_session_factory() as session:
