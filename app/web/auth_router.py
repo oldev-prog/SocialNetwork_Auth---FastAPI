@@ -133,7 +133,7 @@ async def login_user(data: LoginRequest, db: db_session):
         # secure=True,
         secure=False,
         samesite='strict',
-        path='/auth/update_token',
+        path='/',
     )
 
     return response
@@ -207,7 +207,7 @@ async def update_token(request: Request, db: db_session):
         httponly=True,
         secure=False,  # True для HTTPS
         samesite='strict',
-        path='/auth/update_token',
+        path='/',
     )
 
     return response
@@ -274,7 +274,7 @@ async def logout(request: Request, db: db_session):
 
     response.delete_cookie(
         key='refresh_token',
-        path='/auth/update_token',
+        path='/',
         httponly=True,
         samesite='strict'
     )

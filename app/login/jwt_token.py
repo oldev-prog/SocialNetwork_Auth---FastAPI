@@ -62,8 +62,6 @@ class JWTTokenCRUD:
 
         try:
             self.db.add(new_refresh_token)
-            # await self.db.commit()
-            # await self.db.refresh(new_refresh_token)
         except Exception as e:
             logger.error('Failed to add new refresh token: %s', e)
 
