@@ -130,8 +130,8 @@ async def login_user(data: LoginRequest, db: db_session):
         key='refresh_token',
         value=refresh_token,
         httponly=True,
-        # secure=True,
-        secure=False,
+        secure=True,
+        # secure=False,
         samesite='strict',
         path='/',
     )

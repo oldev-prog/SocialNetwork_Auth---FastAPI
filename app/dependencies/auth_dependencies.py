@@ -23,7 +23,7 @@ async def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
 
         return int(user_id)
 
-    except jwt.JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
 
 current_user_id = Annotated[int, Depends(get_current_user_id)]
